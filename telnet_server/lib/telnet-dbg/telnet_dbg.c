@@ -1,31 +1,32 @@
+#include "telnet_dbg_comm.h"
 #include "telnet_dbg_priv.h"
 
 #include <dlfcn.h>
 #include <netdb.h>
 #include <netinet/in.h>
 #include <signal.h>
-#include <string.h>
-#include <sys/socket.h>
+
 #include <sys/types.h>
 
 void* communication(void* thread_data) {
-  char buf[1024];
+  char buf_read[1024];
   struct telnet_dbg_connection_data_t* connection_data = thread_data;
 
   struct telnet_dbg_connection_t* connect = connection_data->connection;
 
   while (!connect->terminated) {
-    int bytes_read = recv(connect->socket, buf, sizeof(buf), 0);
+    int bytes_read = recv(connect->socket, buf_read, sizeof(buf_read), 0);
     if (bytes_read <= 0) {
       break;
     }
 
-    if ((buf[0] == '^') && (buf[1] == ']')) {
+    if ((buf_read[0] == '^') && (buf_read[1] == ']')) {
       send(connect->socket, "BUY\n", 4, 0);
       break;
     }
+    telnet_dbg_comm_parse(connect->socket, buf_read, bytes_read);
 
-    send(connect->socket, buf, bytes_read, 0);
+    //    send(connect->socket, buf, bytes_read, 0);
   }
   if (!connect->terminated) {
     telnet_dbg_connection_del(connection_data->connections_list, connect);
