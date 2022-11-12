@@ -1,7 +1,8 @@
 #include <stdio.h>
 
-int main()
-{
-    printf("Hello World!\n");
-    return 0;
+#include "telnet-dbg/telnet_dbg.h"
+
+int main() {
+  hello_word();
+  return 0;
 }
