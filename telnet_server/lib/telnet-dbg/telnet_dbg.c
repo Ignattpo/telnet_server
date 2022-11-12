@@ -3,41 +3,33 @@
 #include <dlfcn.h>
 #include <netdb.h>
 #include <netinet/in.h>
-
 #include <signal.h>
-#include <stdio.h>
-#include <stdlib.h>
 #include <string.h>
 #include <sys/socket.h>
 #include <sys/types.h>
-#include <unistd.h>
 
 void* communication(void* thread_data) {
   char buf[1024];
-  struct telnet_dbg_connect_t* connect = thread_data;
+  struct telnet_dbg_connection_data_t* connection_data = thread_data;
+
+  struct telnet_dbg_connection_t* connect = connection_data->connection;
 
   while (!connect->terminated) {
     int bytes_read = recv(connect->socket, buf, sizeof(buf), 0);
-    printf("recv %d %d %s\n", bytes_read, connect->socket, buf);
-    for (int i = 0; i < bytes_read; i++) {
-      printf("%x ", buf[i]);
+    if (bytes_read <= 0) {
+      break;
     }
 
     if ((buf[0] == '^') && (buf[1] == ']')) {
       send(connect->socket, "BUY\n", 4, 0);
-      connect->terminated = 1;
-      break;
-    }
-    printf("\n");
-    if (bytes_read <= 0) {
-      connect->terminated = 1;
       break;
     }
 
     send(connect->socket, buf, bytes_read, 0);
   }
-
-  close(connect->socket);
+  if (!connect->terminated) {
+    telnet_dbg_connection_del(connection_data->connections_list, connect);
+  }
 
   return 0;
 }
@@ -72,18 +64,29 @@ void* server_thread(void* thread_data) {
       continue;
     }
 
-    int sock = accept(dbg->socket, NULL, NULL);
-    if (sock < 0) {
+    int connection_socket = accept(dbg->socket, NULL, NULL);
+    if (connection_socket < 0) {
       fprintf(stderr, "ERROR> telnet_dbg addres: %s port: %d \n",
               dbg->name_addr, dbg->port);
       perror("ERROR> telnet_dbg accept");
       break;
     }
 
-    struct telnet_dbg_connect_t connect;
-    connect.terminated = 0;
-    connect.socket = sock;
-    res = pthread_create(&connect.thread, NULL, communication, &connect);
+    struct telnet_dbg_connection_t* connection =
+        telnet_dbg_connection_add(&dbg->connections, connection_socket);
+    if (!connection) {
+      fprintf(stderr,
+              "ERROR> telnet_dbg connections_add  addres: %s port: %d \n",
+              dbg->name_addr, dbg->port);
+      break;
+    }
+
+    struct telnet_dbg_connection_data_t connection_data;
+    connection_data.connections_list = &dbg->connections;
+    connection_data.connection = connection;
+
+    res = pthread_create(&connection->thread, NULL, communication,
+                         &connection_data);
     if (res != 0) {
       fprintf(stderr, "ERROR> telnet_dbg pthread_create addres: %s port: %d \n",
               dbg->name_addr, dbg->port);
@@ -119,7 +122,7 @@ struct telnet_dbg_t* telnet_dbg_init(const char* name_addr, int port) {
 
   int res =
       bind(server_socket, (struct sockaddr*)&sock_addr, sizeof(sock_addr));
-  if (res < 0) {
+  if (res != 0) {
     perror("telnet_dbg_init bind");
     goto aborting;
   }
@@ -133,6 +136,7 @@ struct telnet_dbg_t* telnet_dbg_init(const char* name_addr, int port) {
   dbg->port = port;
   dbg->socket = server_socket;
   dbg->terminated = 0;
+  telnet_dbg_connections_init(&dbg->connections);
 
   return dbg;
 
@@ -156,10 +160,14 @@ int telnet_dbg_run(struct telnet_dbg_t* dbg) {
 int telnet_dbg_stop(struct telnet_dbg_t* dbg) {
   dbg->terminated = 1;
   pthread_join(dbg->thread, NULL);
+  close(dbg->socket);
+
   return 0;
 }
 
 int telnet_dbg_free(struct telnet_dbg_t* dbg) {
+  telnet_dbg_connections_free(&dbg->connections);
   free(dbg->name_addr);
+
   return 0;
 }

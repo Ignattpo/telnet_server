@@ -4,6 +4,7 @@ find_package(Threads REQUIRED)
 
 add_library(telnet_dbg SHARED
     telnet_dbg.c
+    telnet_dbg_connections.c
     telnet_dbg.h
     telnet_dbg_priv.h
 )
