@@ -1,6 +1,7 @@
 #include "telnet_dbg_comm.h"
 
 #include <dlfcn.h>
+#include <inttypes.h>
 
 /*
 Пример работы какой хотелось бы видеть
@@ -98,11 +99,13 @@ static char is_number(char* argv) {
   return 0;
 }
 
-static int get_number_base(char* argv) {
+static long get_number(char* argv) {
+  int base = 10;
   if ((argv[0] == '0') && (argv[1] == 'x')) {
-    return 16;
+    base = 16;
   }
-  return 10;
+
+  return strtoul(argv, NULL, base);
 }
 
 void dbg_memory(int socket, int count, char** argv) {
@@ -117,9 +120,8 @@ void dbg_resolve(int socket, int count, char** argv) {
   }
   char buf[1024];
   if (is_number(argv[1])) {
-    int base = get_number_base(argv[1]);
-    long pointer = strtoul(argv[1], NULL, base);
-    void* ptr = (void*)pointer;
+    long addr = get_number(argv[1]);
+    void* ptr = (void*)addr;
     Dl_info info;
     int res = dladdr(ptr, &info);
     if (res != 0) {
@@ -142,8 +144,78 @@ void dbg_resolve(int socket, int count, char** argv) {
   send(socket, buf, strlen(buf), 0);
 }
 
+enum type_ptr_t { UNKNOWN = 0, U8, U16, U32 };
+
+static enum type_ptr_t get_type_ptr(char* argv) {
+  if (!strcmp(argv, "u8")) {
+    return U8;
+  }
+  if (!strcmp(argv, "u16")) {
+    return U16;
+  }
+  if (!strcmp(argv, "u32")) {
+    return U32;
+  }
+
+  return UNKNOWN;
+}
+
+static void* get_pointer(char* argv, char* is_found) {
+  if (is_number(argv)) {
+    long addr = get_number(argv);
+    *is_found = 1;
+    return (void*)addr;
+  } else {
+    dlerror();
+    void* ptr = dlsym(NULL, argv);
+    void* error = dlerror();
+    if (!error) {
+      *is_found = 1;
+      return ptr;
+    } else {
+      *is_found = 0;
+      return NULL;
+    }
+  }
+  return NULL;
+}
+
+// uint8_t test_8 = 0x8;
+// uint16_t test_16 = 0x16;
+// uint32_t test_32 = 0x32;
+
 void dbg_read(int socket, int count, char** argv) {
-  fprintf(stderr, "%s %d\n", __FUNCTION__, __LINE__);
+  if (count != 3) {
+    char* err = "r command has an incorrect number of arguments\n";
+    send(socket, err, strlen(err), 0);
+    return;
+  }
+  int type_ptr = get_type_ptr(argv[1]);
+  char buf[1024];
+  char is_found = 0;
+  void* ptr = NULL;
+  ptr = get_pointer(argv[2], &is_found);
+  if (!ptr) {
+    sprintf(buf, "Address '%s' not found\n", argv[2]);
+    send(socket, buf, strlen(buf), 0);
+    return;
+  }
+  switch (type_ptr) {
+    case UNKNOWN:
+      sprintf(buf, "Type '%s' not found\n", argv[1]);
+      break;
+    case U8:
+      sprintf(buf, "Address '%s' = 0x%x\n", argv[2], *(uint8_t*)ptr);
+      break;
+    case U16:
+      sprintf(buf, "Address '%s' = 0x%x\n", argv[2], *(uint16_t*)ptr);
+      break;
+    case U32:
+      sprintf(buf, "Address '%s' = 0x%x\n", argv[2], *(uint32_t*)ptr);
+      break;
+  }
+
+  send(socket, buf, strlen(buf), 0);
 }
 
 void dbg_write(int socket, int count, char** argv) {
