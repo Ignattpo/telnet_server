@@ -20,9 +20,6 @@ Connected to localhost.
 > mem write 0x2378423 01 02 FF AA CC
 writed 5 bytes to address 0x2378423
 
-# Читаем Переменную (u8 u16 u32)  - резолвим через dlsym и читаем по адресу
-вместо g_some_var может быть адрес >
- r u32 g_some_var *some_var(0x76cfff)=0xFF
 
 # Пишем в переменную по адресу символа (аналог C-шного *ptr = 0x100500) вместо
 g_some_var может быть адрес >
@@ -74,9 +71,12 @@ static void get_argv(char* buff, int argv_count, char** argv) {
 }
 
 void telnet_dbg_comm_parse(int socket, char* buff, size_t buff_size) {
-  int argv_count = get_count_argv(buff, buff_size);
+  char buff_msg[buff_size];
+  //  Копируем только текущее сообщение, для избавление от мусора
+  memcpy(buff_msg, buff, buff_size);
+  int argv_count = get_count_argv(buff_msg, buff_size);
   char* argv[argv_count];
-  get_argv(buff, argv_count, argv);
+  get_argv(buff_msg, argv_count, argv);
   char comand_found = 0;
   for (int i = 0; i < commands_count; ++i) {
     if (!strcmp(commands[i].name, argv[0])) {
@@ -160,20 +160,17 @@ static enum type_ptr_t get_type_ptr(char* argv) {
   return UNKNOWN;
 }
 
-static void* get_pointer(char* argv, char* is_found) {
+static void* get_pointer(char* argv) {
   if (is_number(argv)) {
     long addr = get_number(argv);
-    *is_found = 1;
     return (void*)addr;
   } else {
     dlerror();
     void* ptr = dlsym(NULL, argv);
     void* error = dlerror();
     if (!error) {
-      *is_found = 1;
       return ptr;
     } else {
-      *is_found = 0;
       return NULL;
     }
   }
@@ -192,11 +189,10 @@ void dbg_read(int socket, int count, char** argv) {
   }
   int type_ptr = get_type_ptr(argv[1]);
   char buf[1024];
-  char is_found = 0;
   void* ptr = NULL;
-  ptr = get_pointer(argv[2], &is_found);
+  ptr = get_pointer(argv[2]);
   if (!ptr) {
-    sprintf(buf, "Address '%s' not found\n", argv[2]);
+    sprintf(buf, "Address '%s' is NULL\n", argv[2]);
     send(socket, buf, strlen(buf), 0);
     return;
   }
@@ -220,6 +216,49 @@ void dbg_read(int socket, int count, char** argv) {
 
 void dbg_write(int socket, int count, char** argv) {
   fprintf(stderr, "%s %d\n", __FUNCTION__, __LINE__);
+  if (count != 4) {
+    char* err = "w command has an incorrect number of arguments\n";
+    send(socket, err, strlen(err), 0);
+    return;
+  }
+  int type_ptr = get_type_ptr(argv[1]);
+  char buf[1024];
+  void* ptr = NULL;
+  ptr = get_pointer(argv[2]);
+  if (!ptr) {
+    sprintf(buf, "Address '%s' is NULL\n", argv[2]);
+    send(socket, buf, strlen(buf), 0);
+    return;
+  }
+  void* ptr_data = NULL;
+  if (is_number(argv[3])) {
+    long number = get_number(argv[3]);
+    ptr_data = &number;
+  } else {
+    sprintf(buf, "Data(%s) of the incorrect type\n", argv[3]);
+    send(socket, buf, strlen(buf), 0);
+    return;
+  }
+
+  switch (type_ptr) {
+    case UNKNOWN:
+      sprintf(buf, "Type '%s' not found\n", argv[1]);
+      break;
+    case U8:
+      *(uint8_t*)ptr = *(uint8_t*)ptr_data;
+      sprintf(buf, "Write address '%s' = 0x%x\n", argv[2], *(uint8_t*)ptr);
+      break;
+    case U16:
+      *(uint16_t*)ptr = *(uint16_t*)ptr_data;
+      sprintf(buf, "Write address '%s' = 0x%x\n", argv[2], *(uint16_t*)ptr);
+      break;
+    case U32:
+      *(uint32_t*)ptr = *(uint32_t*)ptr_data;
+      sprintf(buf, "Write address '%s' = 0x%x\n", argv[2], *(uint32_t*)ptr);
+      break;
+  }
+
+  send(socket, buf, strlen(buf), 0);
 }
 
 void dbg_function(int socket, int count, char** argv) {
