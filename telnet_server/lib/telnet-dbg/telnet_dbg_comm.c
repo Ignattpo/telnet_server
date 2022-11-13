@@ -19,6 +19,38 @@ static struct commands_list_t commands[] = {
     {.name = "w", .function = dbg_write},
     {.name = "c", .function = dbg_function}};
 
+static void copy_buffer(char* buff,
+                        size_t buff_size,
+                        char* out_buff,
+                        size_t* out_buff_size) {
+  bool prev_space = false;
+  size_t i = 0;
+  size_t j = 0;
+  if (buff[0] == ' ') {
+    i++;
+  }
+  for (; i < buff_size; ++i) {
+    if ((buff[i] == ' ') && (prev_space)) {
+      continue;
+    }
+    if (buff[i] == ' ') {
+      prev_space = true;
+    } else {
+      prev_space = false;
+    }
+    out_buff[j] = buff[i];
+    j++;
+  }
+  if (out_buff[j - 3] == ' ') {
+    out_buff[j - 3] = '\0';
+    j -= 3;
+  } else {
+    out_buff[j - 2] = '\0';
+    j -= 2;
+  }
+  *out_buff_size = j;
+}
+
 static int get_count_argv(char* buff, size_t buff_size) {
   int count = 1;
   for (size_t i = 0; i < buff_size; ++i) {
@@ -39,10 +71,10 @@ static void get_argv(char* buff, int argv_count, char** argv) {
 
 void telnet_dbg_comm_parse(int socket, char* buff, size_t buff_size) {
   //  Удаляем из конца перевод строки и перенос каретки
-  size_t msg_size = buff_size - 2;
+  size_t msg_size = 0;
   char buff_msg[msg_size];
-  //  Копируем только текущее сообщение, для избавление от мусора
-  memcpy(buff_msg, buff, msg_size);
+  //  Копируем только текущее сообщение удаляя лишнии пробелы и перенос строки
+  copy_buffer(buff, buff_size, buff_msg, &msg_size);
   int argv_count = get_count_argv(buff_msg, msg_size);
   char* argv[argv_count];
   get_argv(buff_msg, argv_count, argv);
