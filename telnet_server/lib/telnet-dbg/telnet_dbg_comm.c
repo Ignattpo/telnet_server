@@ -9,12 +9,6 @@
 telnet localhost 2323
 Trying ::1...
 Connected to localhost.
-# Дамп памяти
-> mem dump 0x2378423 64
-0x00, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f, 0x00, // @ABCDEFG
-0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // HIJKLMNO
-0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // PQRSTUVW
-0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // XYZ[\]^_
 
 # Пишем в память адрес, далее список байт
 > mem write 0x2378423 01 02 FF AA CC
@@ -90,10 +84,18 @@ void telnet_dbg_comm_parse(int socket, char* buff, size_t buff_size) {
 }
 
 static char is_number(char* argv) {
-  if ((argv[0] >= '0') && (argv[0] <= '9')) {
+  if ((argv[0] == '0') && (argv[1] == 'x')) {
     return 1;
   }
-  return 0;
+  int count = strlen(argv);
+  for (int i = 0; i < count; ++i) {
+    char c = argv[i];
+    if ((c >= '0') && (c <= '9')) {
+      continue;
+    }
+    return 0;
+  }
+  return 1;
 }
 
 static long get_number(char* argv) {
@@ -138,6 +140,7 @@ void dbg_memory_dump(int socket, int count, char** argv) {
     send(socket, err, strlen(err), 0);
     return;
   }
+
   if (!is_number(argv[2])) {
     char err[255];
     sprintf(err, "mem_dump command incorrect number of bytes(%s)\n", argv[2]);
@@ -145,6 +148,8 @@ void dbg_memory_dump(int socket, int count, char** argv) {
     return;
   }
   long byte_count = get_number(argv[2]);
+  //  Размер buff 1024 на запись каждого байта уходит 5 байт и на каждый 8
+  //  добавляется еще 3 байта из за переноса строки 1024/5-((1024/5)/8)*3~=100
   if (byte_count > 100) {
     char err[255];
     sprintf(err,
@@ -154,25 +159,57 @@ void dbg_memory_dump(int socket, int count, char** argv) {
     send(socket, err, strlen(err), 0);
     return;
   }
-  char buf[1024];
+  char buff[1024];
   int j = 0;
   for (int i = 0; i < byte_count; i++) {
-    sprintf(&buf[j], "0x%02x ", *(uint8_t*)ptr);
+    sprintf(&buff[j], "0x%02x ", *(uint8_t*)ptr);
     j += 5;
     if (((i + 1) % 8) == 0) {
       ++j;
-      sprintf(&buf[j], "\n");
+      sprintf(&buff[j], "\n");
       j += 2;
     }
     ptr++;
   }
   ++j;
-  sprintf(&buf[j], "\n");
-  send(socket, buf, j, 0);
+  sprintf(&buff[j], "\n");
+  send(socket, buff, j, 0);
 }
 
+// mem_write 0x2378423 01 02 FF AA CC
 void dbg_memory_write(int socket, int count, char** argv) {
   fprintf(stderr, "%s %d\n", __FUNCTION__, __LINE__);
+  if (count < 3) {
+    char* err = "mem_write command has an incorrect number of arguments\n";
+    send(socket, err, strlen(err), 0);
+    return;
+  }
+  void* ptr = NULL;
+  ptr = get_pointer(argv[1]);
+  if (!ptr) {
+    char err[255];
+    sprintf(err, "Address '%s' is NULL\n", argv[1]);
+    send(socket, err, strlen(err), 0);
+    return;
+  }
+  for (int i = 2; i < count; ++i) {
+    if (!is_number(argv[i])) {
+      char err[255];
+      sprintf(err, "Only numbers can be written, %s not number\n", argv[i]);
+      send(socket, err, strlen(err), 0);
+      return;
+    }
+  }
+  for (int i = 2; i < count; ++i) {
+    void* ptr_data = NULL;
+    long number = get_number(argv[i]);
+    ptr_data = &number;
+    *(uint8_t*)ptr = *(uint8_t*)ptr_data;
+    ++ptr;
+  }
+  char buff[255];
+  sprintf(buff, "Writed %d bytes to address %s\n", count - 2, argv[1]);
+  send(socket, buff, strlen(buff), 0);
 }
 
 void dbg_resolve(int socket, int count, char** argv) {
@@ -181,30 +218,30 @@ void dbg_resolve(int socket, int count, char** argv) {
     send(socket, err, strlen(err), 0);
     return;
   }
-  char buf[1024];
+  char buff[1024];
   if (is_number(argv[1])) {
     long addr = get_number(argv[1]);
     void* ptr = (void*)addr;
     Dl_info info;
     int res = dladdr(ptr, &info);
     if (res != 0) {
-      sprintf(buf, "Address '%s' located at %s within the program %s\n",
+      sprintf(buff, "Address '%s' located at %s within the program %s\n",
               argv[1], info.dli_fname, info.dli_sname);
     } else {
-      sprintf(buf, "Address '%s' not found\n", argv[1]);
+      sprintf(buff, "Address '%s' not found\n", argv[1]);
     }
   } else {
     dlerror();
     void* ptr = dlsym(NULL, argv[1]);
     void* error = dlerror();
     if (!error) {
-      sprintf(buf, "Symbol '%s' at %p\n", argv[1], ptr);
+      sprintf(buff, "Symbol '%s' at %p\n", argv[1], ptr);
     } else {
-      sprintf(buf, "Symbol '%s' not found\n", argv[1]);
+      sprintf(buff, "Symbol '%s' not found\n", argv[1]);
     }
   }
 
-  send(socket, buf, strlen(buf), 0);
+  send(socket, buff, strlen(buff), 0);
 }
 
 enum type_ptr_t { UNKNOWN = 0, U8, U16, U32 };
@@ -234,77 +271,77 @@ void dbg_read(int socket, int count, char** argv) {
     return;
   }
   int type_ptr = get_type_ptr(argv[1]);
-  char buf[1024];
+  char buff[1024];
   void* ptr = NULL;
   ptr = get_pointer(argv[2]);
   if (!ptr) {
-    sprintf(buf, "Address '%s' is NULL\n", argv[2]);
-    send(socket, buf, strlen(buf), 0);
+    sprintf(buff, "Address '%s' is NULL\n", argv[2]);
+    send(socket, buff, strlen(buff), 0);
     return;
   }
   switch (type_ptr) {
     case UNKNOWN:
-      sprintf(buf, "Type '%s' not found\n", argv[1]);
+      sprintf(buff, "Type '%s' not found\n", argv[1]);
       break;
     case U8:
-      sprintf(buf, "Address '%s' = 0x%x\n", argv[2], *(uint8_t*)ptr);
+      sprintf(buff, "Address '%s' = 0x%x\n", argv[2], *(uint8_t*)ptr);
       break;
     case U16:
-      sprintf(buf, "Address '%s' = 0x%x\n", argv[2], *(uint16_t*)ptr);
+      sprintf(buff, "Address '%s' = 0x%x\n", argv[2], *(uint16_t*)ptr);
       break;
     case U32:
-      sprintf(buf, "Address '%s' = 0x%x\n", argv[2], *(uint32_t*)ptr);
+      sprintf(buff, "Address '%s' = 0x%x\n", argv[2], *(uint32_t*)ptr);
       break;
   }
 
-  send(socket, buf, strlen(buf), 0);
+  send(socket, buff, strlen(buff), 0);
 }
 
 void dbg_write(int socket, int count, char** argv) {
-  fprintf(stderr, "%s %d\n", __FUNCTION__, __LINE__);
   if (count != 4) {
     char* err = "w command has an incorrect number of arguments\n";
     send(socket, err, strlen(err), 0);
     return;
   }
   int type_ptr = get_type_ptr(argv[1]);
-  char buf[1024];
+  char buff[1024];
   void* ptr = NULL;
   ptr = get_pointer(argv[2]);
   if (!ptr) {
-    sprintf(buf, "Address '%s' is NULL\n", argv[2]);
-    send(socket, buf, strlen(buf), 0);
+    sprintf(buff, "Address '%s' is NULL\n", argv[2]);
+    send(socket, buff, strlen(buff), 0);
     return;
   }
   void* ptr_data = NULL;
+
   if (is_number(argv[3])) {
     long number = get_number(argv[3]);
     ptr_data = &number;
   } else {
-    sprintf(buf, "Data(%s) of the incorrect type\n", argv[3]);
-    send(socket, buf, strlen(buf), 0);
+    sprintf(buff, "Only numbers can be written, %s not number\n", argv[3]);
+    send(socket, buff, strlen(buff), 0);
     return;
   }
 
   switch (type_ptr) {
     case UNKNOWN:
-      sprintf(buf, "Type '%s' not found\n", argv[1]);
+      sprintf(buff, "Type '%s' not found\n", argv[1]);
       break;
     case U8:
       *(uint8_t*)ptr = *(uint8_t*)ptr_data;
-      sprintf(buf, "Writed address '%s' = 0x%x\n", argv[2], *(uint8_t*)ptr);
+      sprintf(buff, "Writed address '%s' = 0x%x\n", argv[2], *(uint8_t*)ptr);
       break;
     case U16:
       *(uint16_t*)ptr = *(uint16_t*)ptr_data;
-      sprintf(buf, "Writed address '%s' = 0x%x\n", argv[2], *(uint16_t*)ptr);
+      sprintf(buff, "Writed address '%s' = 0x%x\n", argv[2], *(uint16_t*)ptr);
       break;
     case U32:
       *(uint32_t*)ptr = *(uint32_t*)ptr_data;
-      sprintf(buf, "Writed address '%s' = 0x%x\n", argv[2], *(uint32_t*)ptr);
+      sprintf(buff, "Writed address '%s' = 0x%x\n", argv[2], *(uint32_t*)ptr);
       break;
   }
 
-  send(socket, buf, strlen(buf), 0);
+  send(socket, buff, strlen(buff), 0);
 }
 
 void dbg_function(int socket, int count, char** argv) {
