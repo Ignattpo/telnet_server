@@ -21,10 +21,6 @@ Connected to localhost.
 writed 5 bytes to address 0x2378423
 
 
-# Пишем в переменную по адресу символа (аналог C-шного *ptr = 0x100500) вместо
-g_some_var может быть адрес >
- w u32 g_some_var = 0x100500
-
 # Запускаем функцию - так же резолвим через dlsym. Возможно переменное
 количество аргументов. Аргументы в виде 32х битных чисел и NULL-terminated строк
 (до 5 аргументов) >
@@ -35,15 +31,17 @@ func ‘malloc’ at 0x76cadc9 returned 0xFA273A2
 func ‘strlen’ at 0x76caabb returned 0x6
 */
 
-void dbg_memory(int socket, int count, char** argv);
+void dbg_memory_dump(int socket, int count, char** argv);
+void dbg_memory_write(int socket, int count, char** argv);
 void dbg_resolve(int socket, int count, char** argv);
 void dbg_read(int socket, int count, char** argv);
 void dbg_write(int socket, int count, char** argv);
 void dbg_function(int socket, int count, char** argv);
 
-static const int commands_count = 5;
+static const int commands_count = 6;
 static struct commands_list_t commands[] = {
-    {.name = "mem", .function = dbg_memory},
+    {.name = "mem_dump", .function = dbg_memory_dump},
+    {.name = "mem_write", .function = dbg_memory_write},
     {.name = "s", .function = dbg_resolve},
     {.name = "r", .function = dbg_read},
     {.name = "w", .function = dbg_write},
@@ -92,10 +90,9 @@ void telnet_dbg_comm_parse(int socket, char* buff, size_t buff_size) {
 }
 
 static char is_number(char* argv) {
-  if ((argv[0] >= '0') && (argv[0] <= '0')) {
+  if ((argv[0] >= '0') && (argv[0] <= '9')) {
     return 1;
   }
-
   return 0;
 }
 
@@ -108,7 +105,73 @@ static long get_number(char* argv) {
   return strtoul(argv, NULL, base);
 }
 
-void dbg_memory(int socket, int count, char** argv) {
+static void* get_pointer(char* argv) {
+  if (is_number(argv)) {
+    long addr = get_number(argv);
+    return (void*)addr;
+  } else {
+    dlerror();
+    void* ptr = dlsym(NULL, argv);
+    void* error = dlerror();
+    if (!error) {
+      return ptr;
+    } else {
+      return NULL;
+    }
+  }
+  return NULL;
+}
+
+void dbg_memory_dump(int socket, int count, char** argv) {
+  fprintf(stderr, "%s %d\n", __FUNCTION__, __LINE__);
+  if (count != 3) {
+    char* err = "mem_dump command has an incorrect number of arguments\n";
+    send(socket, err, strlen(err), 0);
+    return;
+  }
+
+  void* ptr = NULL;
+  ptr = get_pointer(argv[1]);
+  if (!ptr) {
+    char err[255];
+    sprintf(err, "Address '%s' is NULL\n", argv[1]);
+    send(socket, err, strlen(err), 0);
+    return;
+  }
+  if (!is_number(argv[2])) {
+    char err[255];
+    sprintf(err, "mem_dump command incorrect number of bytes(%s)\n", argv[2]);
+    send(socket, err, strlen(err), 0);
+    return;
+  }
+  long byte_count = get_number(argv[2]);
+  if (byte_count > 100) {
+    char err[255];
+    sprintf(err,
+            "the maximum number of received bytes at a time should not exceed "
+            "100(%s>100)\n",
+            argv[2]);
+    send(socket, err, strlen(err), 0);
+    return;
+  }
+  char buf[1024];
+  int j = 0;
+  for (int i = 0; i < byte_count; i++) {
+    sprintf(&buf[j], "0x%02x ", *(uint8_t*)ptr);
+    j += 5;
+    if (((i + 1) % 8) == 0) {
+      ++j;
+      sprintf(&buf[j], "\n");
+      j += 2;
+    }
+    ptr++;
+  }
+  ++j;
+  sprintf(&buf[j], "\n");
+  send(socket, buf, j, 0);
+}
+
+void dbg_memory_write(int socket, int count, char** argv) {
   fprintf(stderr, "%s %d\n", __FUNCTION__, __LINE__);
 }
 
@@ -160,26 +223,9 @@ static enum type_ptr_t get_type_ptr(char* argv) {
   return UNKNOWN;
 }
 
-static void* get_pointer(char* argv) {
-  if (is_number(argv)) {
-    long addr = get_number(argv);
-    return (void*)addr;
-  } else {
-    dlerror();
-    void* ptr = dlsym(NULL, argv);
-    void* error = dlerror();
-    if (!error) {
-      return ptr;
-    } else {
-      return NULL;
-    }
-  }
-  return NULL;
-}
-
-// uint8_t test_8 = 0x8;
-// uint16_t test_16 = 0x16;
-// uint32_t test_32 = 0x32;
+uint8_t test_8 = 0x8;
+uint16_t test_16 = 0x16;
+uint32_t test_32 = 0x32;
 
 void dbg_read(int socket, int count, char** argv) {
   if (count != 3) {
@@ -246,15 +292,15 @@ void dbg_write(int socket, int count, char** argv) {
       break;
     case U8:
       *(uint8_t*)ptr = *(uint8_t*)ptr_data;
-      sprintf(buf, "Write address '%s' = 0x%x\n", argv[2], *(uint8_t*)ptr);
+      sprintf(buf, "Writed address '%s' = 0x%x\n", argv[2], *(uint8_t*)ptr);
       break;
     case U16:
       *(uint16_t*)ptr = *(uint16_t*)ptr_data;
-      sprintf(buf, "Write address '%s' = 0x%x\n", argv[2], *(uint16_t*)ptr);
+      sprintf(buf, "Writed address '%s' = 0x%x\n", argv[2], *(uint16_t*)ptr);
       break;
     case U32:
       *(uint32_t*)ptr = *(uint32_t*)ptr_data;
-      sprintf(buf, "Write address '%s' = 0x%x\n", argv[2], *(uint32_t*)ptr);
+      sprintf(buf, "Writed address '%s' = 0x%x\n", argv[2], *(uint32_t*)ptr);
       break;
   }
 
