@@ -46,11 +46,11 @@ void telnet_dbg_comm_parse(int socket, char* buff, size_t buff_size) {
   int argv_count = get_count_argv(buff_msg, msg_size);
   char* argv[argv_count];
   get_argv(buff_msg, argv_count, argv);
-  char comand_found = 0;
+  bool comand_found = false;
   for (int i = 0; i < commands_count; ++i) {
     if (!strcmp(commands[i].name, argv[0])) {
       commands[i].function(socket, argv_count, argv);
-      comand_found = 1;
+      comand_found = true;
     }
   }
   if (!comand_found) {
@@ -320,7 +320,7 @@ void dbg_write(int socket, int count, char** argv) {
 
 struct new_arg_t {
   void* value;
-  char is_malloc;
+  bool is_malloc;
 };
 
 static int get_new_arg(int socket,
@@ -333,7 +333,7 @@ static int get_new_arg(int socket,
     if (is_number(argv[i])) {
       long number = get_number(argv[i]);
       new_argv[j].value = (void*)number;
-      new_argv[j].is_malloc = 0;
+      new_argv[j].is_malloc = false;
       j++;
       continue;
     }
@@ -359,11 +359,11 @@ static int get_new_arg(int socket,
       memcpy(str_arg, &buff[1], len - 1);
       str_arg[len - 2] = '\0';
       new_argv[j].value = str_arg;
-      new_argv[j].is_malloc = 1;
+      new_argv[j].is_malloc = true;
       j++;
     } else {
       new_argv[j].value = argv[i];
-      new_argv[j].is_malloc = 0;
+      new_argv[j].is_malloc = false;
       j++;
     }
   }

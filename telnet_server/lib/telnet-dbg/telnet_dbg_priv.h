@@ -4,6 +4,7 @@
 
 #include <pthread.h>
 #include <semaphore.h>
+#include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -12,7 +13,7 @@
 
 struct telnet_dbg_connection_t {
   int socket;
-  char terminated;
+  bool terminated;
   pthread_t thread;
   struct telnet_dbg_connection_t* next;
 };
@@ -32,7 +33,7 @@ struct telnet_dbg_t {
   char* name_addr;
   int port;
   int socket;
-  char terminated;
+  bool terminated;
   pthread_t thread;
   struct telnet_dbg_connections_list_t connections;
 };

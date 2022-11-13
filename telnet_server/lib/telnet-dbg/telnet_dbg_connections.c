@@ -6,7 +6,7 @@ static struct telnet_dbg_connection_t* new_connection(int socket) {
     fprintf(stderr, "ERROR> telnet_dbg_connection_t malloc\n");
     return NULL;
   }
-  connection->terminated = 0;
+  connection->terminated = false;
   connection->socket = socket;
   connection->next = NULL;
 
@@ -90,7 +90,7 @@ void telnet_dbg_connections_free(struct telnet_dbg_connections_list_t* list) {
   while (curr) {
     struct telnet_dbg_connection_t* next = curr->next;
 
-    curr->terminated = 1;
+    curr->terminated = true;
     pthread_cancel(curr->thread);
     pthread_join(curr->thread, NULL);
     close(curr->socket);

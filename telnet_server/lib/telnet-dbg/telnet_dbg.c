@@ -157,7 +157,7 @@ int telnet_dbg_run(struct telnet_dbg_t* dbg) {
 }
 
 int telnet_dbg_stop(struct telnet_dbg_t* dbg) {
-  dbg->terminated = 1;
+  dbg->terminated = true;
   pthread_join(dbg->thread, NULL);
   close(dbg->socket);
 
