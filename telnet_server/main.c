@@ -1,4 +1,5 @@
 #include <dlfcn.h>
+#include <inttypes.h>
 #include <stdio.h>
 #include <unistd.h>
 

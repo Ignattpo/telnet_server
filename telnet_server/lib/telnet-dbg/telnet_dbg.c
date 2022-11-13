@@ -13,7 +13,7 @@ void* communication(void* thread_data) {
   struct telnet_dbg_connection_data_t* connection_data = thread_data;
 
   struct telnet_dbg_connection_t* connect = connection_data->connection;
-
+  send(connect->socket, "Hello\n", 6, 0);
   while (!connect->terminated) {
     int bytes_read = recv(connect->socket, buf_read, sizeof(buf_read), 0);
     if (bytes_read <= 0) {
@@ -21,12 +21,10 @@ void* communication(void* thread_data) {
     }
 
     if ((buf_read[0] == '^') && (buf_read[1] == ']')) {
-      send(connect->socket, "BUY\n", 4, 0);
+      send(connect->socket, "Buy\n", 4, 0);
       break;
     }
     telnet_dbg_comm_parse(connect->socket, buf_read, bytes_read);
-
-    //    send(connect->socket, buf, bytes_read, 0);
   }
   if (!connect->terminated) {
     telnet_dbg_connection_del(connection_data->connections_list, connect);
